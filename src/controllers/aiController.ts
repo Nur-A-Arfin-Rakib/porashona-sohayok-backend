@@ -15,14 +15,20 @@ export const generateCards = asyncHandler(async (req: AuthRequest, res: Response
     throw new Error("টপিক, সাবজেক্ট এবং ক্লাস দিতে হবে");
   }
 
-  const cards = await generateStudyCards({
-    topic,
-    subject,
-    studyClass,
-    difficulty,
-    type,
-    count: Math.min(Number(count), 20),
-  });
+  let cards;
+  try {
+    cards = await generateStudyCards({
+      topic,
+      subject,
+      studyClass,
+      difficulty,
+      type,
+      count: Math.min(Number(count), 20),
+    });
+  } catch (err: any) {
+    res.status(err.message?.includes("ব্যস্ত") ? 429 : 500);
+    throw err;
+  }
 
   const set = await FlashcardSet.create({
     user: req.user!._id,
@@ -127,8 +133,10 @@ export const sendChatMessage = asyncHandler(async (req: AuthRequest, res: Respon
       `data: ${JSON.stringify({ type: "done", sessionId: session._id, suggestions })}\n\n`
     );
     res.end();
-  } catch (error) {
-    res.write(`data: ${JSON.stringify({ type: "error", message: "AI রেসপন্স আনতে সমস্যা হয়েছে" })}\n\n`);
+  } catch (error: any) {
+    res.write(
+      `data: ${JSON.stringify({ type: "error", message: error?.message || "AI রেসপন্স আনতে সমস্যা হয়েছে" })}\n\n`
+    );
     res.end();
   }
 });

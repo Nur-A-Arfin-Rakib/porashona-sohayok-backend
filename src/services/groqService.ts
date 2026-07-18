@@ -12,6 +12,10 @@ interface GenerateCardsParams {
   count: number;
 }
 
+const RATE_LIMIT_MESSAGE =
+  "AI সার্ভিস এই মুহূর্তে ব্যস্ত (দৈনিক সীমা শেষ হয়ে গেছে)। কিছুক্ষণ পর আবার চেষ্টা করো।";
+const GENERIC_AI_ERROR_MESSAGE = "AI সার্ভিসের সাথে সংযোগ করতে সমস্যা হয়েছে। আবার চেষ্টা করো।";
+
 /**
  * টপিক দিয়ে flashcard বা MCQ সেট জেনারেট করে (AI Content Generator ফিচার)
  * Groq কে structured JSON রিটার্ন করতে বলা হচ্ছে
@@ -35,15 +39,23 @@ Respond ONLY with a valid JSON array, no markdown, no code fences, no preamble.
 ${formatInstruction}
 Write questions and answers in Bangla (বাংলা) language, clear and student-friendly, matching Bangladesh HSC/SSC curriculum style.`;
 
-  const completion = await groq.chat.completions.create({
-    model: MODEL,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: `Topic: ${topic}` },
-    ],
-    temperature: 0.7,
-    max_tokens: 8000,
-  });
+  let completion;
+  try {
+    completion = await groq.chat.completions.create({
+      model: MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Topic: ${topic}` },
+      ],
+      temperature: 0.7,
+      max_tokens: 8000,
+    });
+  } catch (err: any) {
+    if (err?.status === 429) {
+      throw new Error(RATE_LIMIT_MESSAGE);
+    }
+    throw new Error(GENERIC_AI_ERROR_MESSAGE);
+  }
 
   const raw = completion.choices[0]?.message?.content || "[]";
   const cleaned = raw.replace(/```json|```/g, "").trim();
@@ -74,13 +86,21 @@ Explain concepts step by step, use simple examples relevant to Bangladeshi stude
 Keep answers focused and not too long. If a question is unclear, ask a clarifying follow-up.`,
   };
 
-  const stream = await groq.chat.completions.create({
-    model: MODEL,
-    messages: [systemPrompt, ...messages],
-    temperature: 0.6,
-    max_tokens: 1500,
-    stream: true,
-  });
+  let stream;
+  try {
+    stream = await groq.chat.completions.create({
+      model: MODEL,
+      messages: [systemPrompt, ...messages],
+      temperature: 0.6,
+      max_tokens: 1500,
+      stream: true,
+    });
+  } catch (err: any) {
+    if (err?.status === 429) {
+      throw new Error(RATE_LIMIT_MESSAGE);
+    }
+    throw new Error(GENERIC_AI_ERROR_MESSAGE);
+  }
 
   let fullText = "";
   for await (const chunk of stream) {
@@ -100,25 +120,25 @@ export const generateFollowUpSuggestions = async (
   lastUserMessage: string,
   lastAssistantMessage: string
 ): Promise<string[]> => {
-  const completion = await groq.chat.completions.create({
-    model: MODEL,
-    messages: [
-      {
-        role: "system",
-        content: `Based on the conversation, suggest exactly 3 short follow-up questions (in Bangla, max 8 words each) a student might ask next. Respond ONLY as a JSON array of 3 strings, no markdown.`,
-      },
-      {
-        role: "user",
-        content: `Student asked: "${lastUserMessage}"\nTutor answered: "${lastAssistantMessage.slice(0, 500)}"`,
-      },
-    ],
-    temperature: 0.8,
-    max_tokens: 200,
-  });
-
-  const raw = completion.choices[0]?.message?.content || "[]";
-  const cleaned = raw.replace(/```json|```/g, "").trim();
   try {
+    const completion = await groq.chat.completions.create({
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content: `Based on the conversation, suggest exactly 3 short follow-up questions (in Bangla, max 8 words each) a student might ask next. Respond ONLY as a JSON array of 3 strings, no markdown.`,
+        },
+        {
+          role: "user",
+          content: `Student asked: "${lastUserMessage}"\nTutor answered: "${lastAssistantMessage.slice(0, 500)}"`,
+        },
+      ],
+      temperature: 0.8,
+      max_tokens: 200,
+    });
+
+    const raw = completion.choices[0]?.message?.content || "[]";
+    const cleaned = raw.replace(/```json|```/g, "").trim();
     return JSON.parse(cleaned);
   } catch {
     return ["আরও উদাহরণ দাও", "সহজ করে বলো", "এটা পরীক্ষায় কীভাবে আসে?"];
